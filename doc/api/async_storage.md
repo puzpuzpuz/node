@@ -15,8 +15,6 @@ const { AsyncStorage } = require('async_storage');
 
 ### Class: AsyncStorage
 
-Each instance of AsyncStorage 
-
 ### new AsyncStorage()
 
 Creates a new instance of AsyncStorage. Until the `enter` method is called, it
@@ -24,11 +22,11 @@ does not provide any storage features.
 
 ### asyncStorage.enter(callback)
 
-Calling `asyncStorage.enter(callback)` will create a new asynchronous resource 
+Calling `asyncStorage.enter(callback)` will create a new asynchronous resource
 and call the provided callback into it.
 
-A new instance of `Map` (the store) will be given as parameter to the callback. 
-This store will be persistent through the following asynchronous calls. 
+A new instance of `Map` (the store) will be given as parameter to the callback.
+This store will be persistent through the following asynchronous calls.
 
 ### asyncStorage.exit(callback)
 
@@ -39,7 +37,7 @@ calls from the async storage. In the callback and further operations,
 ### asyncStorage.getStore()
 
 Calling this method outside of an asynchronous context initialized by calling
-`asyncStorage.enter` or after a call to `asyncStorage.exit` will return 
+`asyncStorage.enter` or after a call to `asyncStorage.exit` will return
 `undefined`.
 
 Otherwise it will return the current context.
