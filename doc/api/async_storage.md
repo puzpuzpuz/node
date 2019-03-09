@@ -1,6 +1,6 @@
 # Async Storage
 
-<!--introduced_in=v12.x.x-->
+<!--introduced_in=REPLACEME-->
 
 > Stability: 1 - Experimental
 
