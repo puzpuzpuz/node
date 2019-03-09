@@ -1,5 +1,5 @@
 'use strict';
-
+const common = require('../common');
 const assert = require('assert');
 const { AsyncStorage } = require('async_storage');
 
@@ -31,5 +31,3 @@ asyncStorage1.enter((store1) => {
     });
   });
 });
-
-

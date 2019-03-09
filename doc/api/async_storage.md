@@ -8,7 +8,7 @@ The `async_storage` module provides an API to use a unique context through
 multiple asynchronous operations.
 
 ```js
-const {AsyncStorage} = require('async_storage');
+const { AsyncStorage } = require('async_storage');
 ```
 
 ## Public API
@@ -51,7 +51,7 @@ it to display enhanced logs without needing to explicitly pass the current
 HTTP request to it.
 
 ```js
-const {AsyncStorage} = require('async_storage');
+const { AsyncStorage } = require('async_storage');
 const http = require('http');
 
 const K_REQ = 'CURRENT_REQUEST';
