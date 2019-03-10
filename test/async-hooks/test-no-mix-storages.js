@@ -5,31 +5,18 @@ const { AsyncStorage } = require('async_hooks');
 
 const asyncStorage = new AsyncStorage();
 
-asyncStorage.enter((store) => {
-  store.set('hello', 'world');
+setTimeout(() => {
+  asyncStorage.enter().set('hello', 'world');
   setTimeout(() => {
     assert.strictEqual(asyncStorage.getStore().get('hello'), 'world');
-    setTimeout(() => {
-      assert.strictEqual(asyncStorage.getStore().get('hello'), 'world');
-      asyncStorage.exit(() => {
-        assert.strictEqual(asyncStorage.getStore(), undefined);
-      });
-    }, 1000);
-  }, 1000);
-});
+    asyncStorage.exit();
+  }, 200);
+}, 100);
 
-asyncStorage.enter((store) => {
-  store.set('hello', 'hearth');
+setTimeout(() => {
+  asyncStorage.enter().set('hello', 'earth');
   setTimeout(() => {
-    assert.strictEqual(asyncStorage.getStore().get('hello'), 'hearth');
-    setTimeout(() => {
-      assert.strictEqual(asyncStorage.getStore().get('hello'), 'hearth');
-      setTimeout(() => {
-        assert.strictEqual(asyncStorage.getStore().get('hello'), 'hearth');
-        asyncStorage.exit(() => {
-          assert.strictEqual(asyncStorage.getStore(), undefined);
-        });
-      }, 1000);
-    }, 1000);
-  }, 500);
-});
+    assert.strictEqual(asyncStorage.getStore().get('hello'), 'earth');
+    asyncStorage.exit();
+  }, 100);
+}, 100);

@@ -721,19 +721,18 @@ This class is used to create contexts that can be used through the event loop.
 Creates a new instance of AsyncStorage. Until the `enter` method is called, it
 does not provide any storage features.
 
-### asyncStorage.enter(callback)
+### asyncStorage.enter()
 
-Calling `asyncStorage.enter(callback)` will create a new asynchronous resource
-and call the provided callback into it.
+Calling `asyncStorage.enter()` will create a new asynchronous context.
+This method returns a `Map` known as the store.
 
-A new instance of `Map` (the store) will be given as parameter to the callback.
 This store will be persistent through the following asynchronous calls.
 
-### asyncStorage.exit(callback)
+### asyncStorage.exit()
 
-Calling `asyncStorage.exit(callback)` will remove the following asynchronous
-calls from the async storage. In the callback and further operations,
-`asyncStorage.getStore()` will return `undefined`. 
+Calling `asyncStorage.exit()` will remove the following asynchronous
+calls from the async storage. In further operations,`asyncStorage.getStore()` 
+will return `undefined`. 
 
 ### asyncStorage.getStore()
 
@@ -769,15 +768,14 @@ function log(...args) {
 }
 
 http.createServer((request, response) => {
-  asyncStorage.enter((store) => {
-    store.set(kReq, request);
-    // some code
-    someAsyncOperation((err, result) => {
-      if (err){
-        log('ERR', err.message);
-        // ... rest of the code
-      }
-    });
+  const store = asyncStorage.enter();
+  store.set(kReq, request);
+  // some code
+   someAsyncOperation((err, result) => {
+    if (err){
+      log('ERR', err.message);
+      // ... rest of the code
+    }
   });
 })
 .listen(8080);
