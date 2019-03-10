@@ -712,6 +712,77 @@ never be called.
 * Returns: {number} The same `triggerAsyncId` that is passed to the
 `AsyncResource` constructor.
 
+## Class: AsyncStorage
+
+This class is used to create contexts that can be used through the event loop.
+
+### new AsyncStorage()
+
+Creates a new instance of AsyncStorage. Until the `enter` method is called, it
+does not provide any storage features.
+
+### asyncStorage.enter(callback)
+
+Calling `asyncStorage.enter(callback)` will create a new asynchronous resource
+and call the provided callback into it.
+
+A new instance of `Map` (the store) will be given as parameter to the callback.
+This store will be persistent through the following asynchronous calls.
+
+### asyncStorage.exit(callback)
+
+Calling `asyncStorage.exit(callback)` will remove the following asynchronous
+calls from the async storage. In the callback and further operations,
+`asyncStorage.getStore()` will return `undefined`. 
+
+### asyncStorage.getStore()
+
+Calling this method outside of an asynchronous context initialized by calling
+`asyncStorage.enter` or after a call to `asyncStorage.exit` will return
+`undefined`.
+
+Otherwise it will return the current context.
+
+## Example
+
+Let's build a logger that will always know the current HTTP request and use
+it to display enhanced logs without needing to explicitly pass the current
+HTTP request to it.
+
+```js
+const { AsyncStorage } = require('async_storage');
+const http = require('http');
+
+const kReq = 'CURRENT_REQUEST';
+const asyncStorage = new AsyncStorage();
+
+function log(...args) {
+  const store = asyncStorage.getStore();
+  // Let's make sure the store exists and it contains a request
+  if (store && store.has(kReq)) {
+    const req = store.get(kReq);
+    // For instance, prints `GET /items ERR could not do something
+    console.log(req.method, req.url, ...args);
+  } else {
+    console.log(...args);
+  }
+}
+
+http.createServer((request, response) => {
+  asyncStorage.enter((store) => {
+    store.set(kReq, request);
+    // some code
+    someAsyncOperation((err, result) => {
+      if (err){
+        log('ERR', err.message);
+        // ... rest of the code
+      }
+    });
+  });
+})
+.listen(8080);
+```
+
 [`after` callback]: #async_hooks_after_asyncid
 [`asyncResource.runInAsyncScope()`]: #async_hooks_asyncresource_runinasyncscope_fn_thisarg_args
 [`before` callback]: #async_hooks_before_asyncid

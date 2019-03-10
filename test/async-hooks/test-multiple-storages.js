@@ -1,7 +1,7 @@
 'use strict';
 const common = require('../common');
 const assert = require('assert');
-const { AsyncStorage } = require('async_storage');
+const { AsyncStorage } = require('async_hooks');
 
 const asyncStorage1 = new AsyncStorage();
 const asyncStorage2 = new AsyncStorage();
