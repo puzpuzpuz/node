@@ -716,28 +716,28 @@ never be called.
 
 This class is used to create contexts that can be used through the event loop.
 
-### new AsyncStorage()
+### new AsyncContext()
 
-Creates a new instance of AsyncStorage. Until the `enter` method is called, it
+Creates a new instance of AsyncContext. Until the `enter` method is called, it
 does not provide any storage features.
 
-### asyncStorage.enter()
+### asyncContext.enter()
 
-Calling `asyncStorage.enter()` will create a new asynchronous context.
+Calling `asyncContext.enter()` will create a new asynchronous context.
 This method returns a `Map` known as the store.
 
 This store will be persistent through the following asynchronous calls.
 
-### asyncStorage.exit()
+### asyncContext.exit()
 
-Calling `asyncStorage.exit()` will remove the following asynchronous
-calls from the async storage. In further operations,`asyncStorage.getStore()` 
+Calling `asyncContext.exit()` will remove the following asynchronous
+calls from the async storage. In further operations,`asyncContext.getStore()` 
 will return `undefined`. 
 
-### asyncStorage.getStore()
+### asyncContext.getStore()
 
 Calling this method outside of an asynchronous context initialized by calling
-`asyncStorage.enter` or after a call to `asyncStorage.exit` will return
+`asyncContext.enter` or after a call to `asyncContext.exit` will return
 `undefined`.
 
 Otherwise it will return the current context.
@@ -749,7 +749,7 @@ it to display enhanced logs without needing to explicitly pass the current
 HTTP request to it.
 
 ```js
-const { AsyncStorage } = require('async_storage');
+const { AsyncContext } = require('async_storage');
 const http = require('http');
 
 const kReq = 'CURRENT_REQUEST';
