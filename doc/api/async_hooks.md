@@ -716,33 +716,7 @@ never be called.
 
 This class is used to create contexts that can be used through the event loop.
 
-### new AsyncContext()
-
-Creates a new instance of AsyncContext. Until the `enter` method is called, it
-does not provide any storage features.
-
-### asyncContext.enter()
-
-Calling `asyncContext.enter()` will create a new asynchronous context.
-This method returns a `Map` known as the store.
-
-This store will be persistent through the following asynchronous calls.
-
-### asyncContext.exit()
-
-Calling `asyncContext.exit()` will remove the following asynchronous
-calls from the async storage. In further operations,`asyncContext.getStore()` 
-will return `undefined`. 
-
-### asyncContext.getStore()
-
-Calling this method outside of an asynchronous context initialized by calling
-`asyncContext.enter` or after a call to `asyncContext.exit` will return
-`undefined`.
-
-Otherwise it will return the current context.
-
-## Example
+### Example
 
 Let's build a logger that will always know the current HTTP request and use
 it to display enhanced logs without needing to explicitly pass the current
@@ -780,6 +754,32 @@ http.createServer((request, response) => {
 })
 .listen(8080);
 ```
+
+### new AsyncContext()
+
+Creates a new instance of AsyncContext. Until the `enter` method is called, it
+does not provide any storage features.
+
+### asyncContext.enter()
+
+Calling `asyncContext.enter()` will create a new asynchronous context.
+This method returns a `Map` known as the store.
+
+This store will be persistent through the following asynchronous calls.
+
+### asyncContext.exit()
+
+Calling `asyncContext.exit()` will remove the following asynchronous
+calls from the async storage. In further operations,`asyncContext.getStore()` 
+will return `undefined`. 
+
+### asyncContext.getStore()
+
+Calling this method outside of an asynchronous context initialized by calling
+`asyncContext.enter` or after a call to `asyncContext.exit` will return
+`undefined`.
+
+Otherwise it will return the current context.
 
 [`after` callback]: #async_hooks_after_asyncid
 [`asyncResource.runInAsyncScope()`]: #async_hooks_asyncresource_runinasyncscope_fn_thisarg_args
