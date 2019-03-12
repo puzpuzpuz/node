@@ -712,7 +712,7 @@ never be called.
 * Returns: {number} The same `triggerAsyncId` that is passed to the
 `AsyncResource` constructor.
 
-## Class: AsyncStorage
+## Class: AsyncContext
 
 This class is used to create contexts that can be used through the event loop.
 
@@ -727,10 +727,10 @@ const { AsyncContext } = require('async_storage');
 const http = require('http');
 
 const kReq = 'CURRENT_REQUEST';
-const asyncStorage = new AsyncStorage();
+const asyncContext = new AsyncContext();
 
 function log(...args) {
-  const store = asyncStorage.getStore();
+  const store = asyncContext.getStore();
   // Let's make sure the store exists and it contains a request
   if (store && store.has(kReq)) {
     const req = store.get(kReq);
@@ -742,7 +742,7 @@ function log(...args) {
 }
 
 http.createServer((request, response) => {
-  const store = asyncStorage.enter();
+  const store = asyncContext.enter();
   store.set(kReq, request);
   // some code
    someAsyncOperation((err, result) => {
