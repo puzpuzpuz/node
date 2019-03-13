@@ -32,7 +32,6 @@
       'lib/internal/bootstrap/node.js',
       'lib/internal/bootstrap/pre_execution.js',
       'lib/async_hooks.js',
-      'lib/async_storage.js',
       'lib/assert.js',
       'lib/buffer.js',
       'lib/child_process.js',
