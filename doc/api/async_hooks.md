@@ -723,7 +723,7 @@ it to display enhanced logs without needing to explicitly pass the current
 HTTP request to it.
 
 ```js
-const { AsyncContext } = require('async_storage');
+const { AsyncContext } = require('async_hooks');
 const http = require('http');
 
 const kReq = 'CURRENT_REQUEST';
