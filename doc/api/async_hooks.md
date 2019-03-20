@@ -767,12 +767,6 @@ This method returns a `Map` known as the store.
 
 This store will be persistent through the following asynchronous calls.
 
-### asyncContext.exit()
-
-Calling `asyncContext.exit()` will remove the following asynchronous
-calls from the async storage. In further operations,`asyncContext.getStore()` 
-will return `undefined`. 
-
 ### asyncContext.getStore()
 
 Calling this method outside of an asynchronous context initialized by calling
