@@ -6,17 +6,20 @@ const { AsyncContext } = require('async_hooks');
 const asyncContext = new AsyncContext();
 
 setTimeout(() => {
-  asyncContext.enter().set('hello', 'world');
-  setTimeout(() => {
-    assert.strictEqual(asyncContext.getStore().get('hello'), 'world');
-    asyncContext.exit();
-  }, 200);
+  asyncContext.enter((store) => {
+    store.set('hello', 'world');
+    setTimeout(() => {
+      assert.strictEqual(asyncContext.getStore().get('hello'), 'world');
+    }, 200);
+  });
 }, 100);
 
 setTimeout(() => {
-  asyncContext.enter().set('hello', 'earth');
-  setTimeout(() => {
-    assert.strictEqual(asyncContext.getStore().get('hello'), 'earth');
-    asyncContext.exit();
-  }, 100);
+  asyncContext.enter((store) => {
+    store.set('hello', 'earth');
+    setTimeout(() => {
+      assert.strictEqual(asyncContext.getStore().get('hello'), 'earth');
+    }, 100);
+  });
 }, 100);
+
