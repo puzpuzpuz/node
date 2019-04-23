@@ -742,14 +742,15 @@ function log(...args) {
 }
 
 http.createServer((request, response) => {
-  const store = asyncContext.enter();
-  store.set(kReq, request);
-  // some code
-   someAsyncOperation((err, result) => {
-    if (err){
-      log('ERR', err.message);
-      // ... rest of the code
-    }
+  asyncContext.enter((store) => {
+      store.set(kReq, request);
+      // some code
+       someAsyncOperation((err, result) => {
+        if (err){
+          log('ERR', err.message);
+          // ... rest of the code
+        }
+      });
   });
 })
 .listen(8080);
@@ -760,18 +761,17 @@ http.createServer((request, response) => {
 Creates a new instance of AsyncContext. Until the `enter` method is called, it
 does not provide any storage features.
 
-### asyncContext.enter()
+### asyncContext.enter(callback)
 
-Calling `asyncContext.enter()` will create a new asynchronous context.
-This method returns a `Map` known as the store.
+Calling `asyncContext.enter(callback)` will create a new asynchronous context.
+This method will call the callback with a `Map` known as the store as argument.
 
 This store will be persistent through the following asynchronous calls.
 
 ### asyncContext.getStore()
 
 Calling this method outside of an asynchronous context initialized by calling
-`asyncContext.enter` or after a call to `asyncContext.exit` will return
-`undefined`.
+`asyncContext.enter` will return `undefined`.
 
 Otherwise it will return the current context.
 
