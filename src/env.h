@@ -685,6 +685,11 @@ class AsyncHooks : public MemoryRetainer {
   inline bool pop_async_id(double async_id);
   inline void clear_async_id_stack();  // Used in fatal exceptions.
 
+  inline void set_execution_async_resource(
+    v8::Local<v8::Value> execution_async_resource_);
+  inline v8::Local<v8::Value> get_execution_async_resource();
+  inline void clear_execution_async_resource();
+
   AsyncHooks(const AsyncHooks&) = delete;
   AsyncHooks& operator=(const AsyncHooks&) = delete;
   AsyncHooks(AsyncHooks&&) = delete;
@@ -727,6 +732,8 @@ class AsyncHooks : public MemoryRetainer {
   AliasedFloat64Array async_id_fields_;
 
   void grow_async_ids_stack();
+
+  v8::Persistent<v8::Value> execution_async_resource_;
 };
 
 class ImmediateInfo : public MemoryRetainer {
