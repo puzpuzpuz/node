@@ -314,7 +314,8 @@ class Parser : public AsyncWrap, public StreamListener {
     MaybeLocal<Value> head_response;
     {
       InternalCallbackScope callback_scope(
-          this, InternalCallbackScope::kSkipTaskQueues);
+          env(), GetOwner(), { get_async_id(), get_trigger_async_id() },
+          InternalCallbackScope::kSkipTaskQueues);
       head_response = cb.As<Function>()->Call(
           env()->context(), object(), arraysize(argv), argv);
     }
@@ -386,7 +387,8 @@ class Parser : public AsyncWrap, public StreamListener {
     MaybeLocal<Value> r;
     {
       InternalCallbackScope callback_scope(
-          this, InternalCallbackScope::kSkipTaskQueues);
+          env(), GetOwner(), { get_async_id(), get_trigger_async_id() },
+          InternalCallbackScope::kSkipTaskQueues);
       r = cb.As<Function>()->Call(env()->context(), object(), 0, nullptr);
     }
 
