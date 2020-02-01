@@ -1,6 +1,6 @@
 'use strict';
 
-const common = require('../common');
+require('../common');
 const assert = require('assert');
 const {
   executionAsyncResource,
@@ -22,14 +22,10 @@ const server = http.createServer((req, res) => {
   res.end('ok');
 });
 
-server.listen(common.PORT, () => {
-  // so far, so good
+server.listen(0, () => {
   assert.strictEqual(executionAsyncResource(), hooked[executionAsyncId()]);
 
-  http.get({ port: common.PORT }, () => {
-    console.log('1: executionAsyncId()', executionAsyncId());
-    console.log('1: executionAsyncResource()', executionAsyncResource());
-    // this one fails
+  http.get({ port: server.address().port }, () => {
     assert.strictEqual(executionAsyncResource(), hooked[executionAsyncId()]);
     server.close();
   });
