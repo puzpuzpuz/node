@@ -3,10 +3,14 @@
 const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
+const assert = require('assert');
 const http2 = require('http2');
 
 const server = http2.createServer();
-server.setTimeout(common.platformTimeout(50));
+server.setTimeout(42000);
+assert.strictEqual(server.timeout, 42000);
+
+server.timeout = common.platformTimeout(50);
 
 const onServerTimeout = common.mustCall((session) => {
   session.close();
