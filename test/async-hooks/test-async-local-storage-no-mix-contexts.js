@@ -4,9 +4,7 @@ const assert = require('assert');
 const { AsyncLocalStorage } = require('async_hooks');
 
 const asyncLocalStorage = new AsyncLocalStorage();
-asyncLocalStorage.enable();
 const asyncLocalStorage2 = new AsyncLocalStorage();
-asyncLocalStorage2.enable();
 
 setTimeout(() => {
   asyncLocalStorage.run(() => {

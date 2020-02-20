@@ -5,7 +5,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const http = require('http');
 
 const asynclocal = new AsyncLocalStorage();
-asynclocal.enable();
+
 const server = http.createServer((req, res) => {
   res.end('ok');
 });

@@ -5,13 +5,14 @@ const { AsyncLocalStorage } = require('async_hooks');
 
 // case 1 fully async APIS (safe)
 const asyncLocalStorage = new AsyncLocalStorage();
-asyncLocalStorage.enable();
+
 let i = 0;
 process.setUncaughtExceptionCaptureCallback((err) => {
   ++i;
   assert.strictEqual(err.message, 'err' + i);
   assert.strictEqual(asyncLocalStorage.getStore().get('hello'), 'node');
 });
+
 asyncLocalStorage.run((str) => {
   const store = asyncLocalStorage.getStore();
   assert.strictEqual(str, 'hello');

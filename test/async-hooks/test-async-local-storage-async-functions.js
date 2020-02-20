@@ -6,7 +6,6 @@ const { AsyncLocalStorage } = require('async_hooks');
 async function foo() {}
 
 const asyncLocalStorage = new AsyncLocalStorage();
-asyncLocalStorage.enable();
 
 async function testOut() {
   await foo();

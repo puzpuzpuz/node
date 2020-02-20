@@ -5,13 +5,14 @@ const { AsyncLocalStorage } = require('async_hooks');
 
 // case 2 using *AndReturn calls (dual behaviors)
 const asyncLocalStorage = new AsyncLocalStorage();
-asyncLocalStorage.enable();
+
 let i = 0;
 process.setUncaughtExceptionCaptureCallback((err) => {
   ++i;
   assert.strictEqual(err.message, 'err2');
   assert.strictEqual(asyncLocalStorage.getStore().get('hello'), 'node');
 });
+
 try {
   asyncLocalStorage.runSyncAndReturn((val) => {
     const store = asyncLocalStorage.getStore();
