@@ -933,7 +933,7 @@ instance will be exited.
 Calling `asyncLocalStorage.disable()` is required before the
 `asyncLocalStorage` can be garbage collected. This does not apply to stores
 provided by the `asyncLocalStorage`, as those objects are garbage collected
-along with the corresponding async resource.
+along with the corresponding async resources.
 
 This method is to be used when the `asyncLocalStorage` is not in use anymore
 in the current process.
