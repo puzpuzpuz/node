@@ -931,7 +931,9 @@ When calling `asyncLocalStorage.disable()`, all current contexts linked to the
 instance will be exited.
 
 Calling `asyncLocalStorage.disable()` is required before the
-`asyncLocalStorage` can be garbage collected.
+`asyncLocalStorage` can be garbage collected. This does not apply to stores
+provided by the `asyncLocalStorage`, as those objects are garbage collected
+along with the corresponding async resource.
 
 This method is to be used when the `asyncLocalStorage` is not in use anymore
 in the current process.
@@ -1069,7 +1071,7 @@ the context will be re-entered.
 Example:
 
 ```js
-// Within a call to run or runAsyncAndReturn
+// Within a call to run or runSyncAndReturn
 try {
   asyncLocalStorage.getStore(); // Returns a Map
   asyncLocalStorage.exitSyncAndReturn(() => {
@@ -1082,7 +1084,7 @@ try {
 }
 ```
 
-### Choosing between `run` and `runAsyncAndReturn`
+### Choosing between `run` and `runSyncAndReturn`
 
 #### When to choose `run`
 
