@@ -14,7 +14,7 @@ asyncLocalStorage.run((runArg) => {
 
 asyncLocalStorage.runSyncAndReturn((runArg) => {
   assert.strictEqual(runArg, 'foo');
-  asyncLocalStorage.exit((exitArg) => {
+  asyncLocalStorage.exitSyncAndReturn((exitArg) => {
     assert.strictEqual(exitArg, 'bar');
   }, 'bar');
 }, 'foo');
