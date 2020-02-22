@@ -13,9 +13,8 @@ process.setUncaughtExceptionCaptureCallback((err) => {
   assert.strictEqual(asyncLocalStorage.getStore().get('hello'), 'node');
 });
 
-asyncLocalStorage.run((str) => {
+asyncLocalStorage.run(() => {
   const store = asyncLocalStorage.getStore();
-  assert.strictEqual(str, 'hello');
   store.set('hello', 'node');
   setTimeout(() => {
     process.nextTick(() => {
@@ -24,4 +23,4 @@ asyncLocalStorage.run((str) => {
     throw new Error('err2');
   }, 0);
   throw new Error('err1');
-}, 'hello');
+});

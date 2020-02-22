@@ -14,9 +14,8 @@ process.setUncaughtExceptionCaptureCallback((err) => {
 });
 
 try {
-  asyncLocalStorage.runSyncAndReturn((val) => {
+  asyncLocalStorage.runSyncAndReturn(() => {
     const store = asyncLocalStorage.getStore();
-    assert.strictEqual(val, 'str');
     store.set('hello', 'node');
     setTimeout(() => {
       process.nextTick(() => {
@@ -25,7 +24,7 @@ try {
       throw new Error('err2');
     }, 0);
     throw new Error('err1');
-  }, 'str');
+  });
 } catch (e) {
   assert.strictEqual(e.message, 'err1');
   assert.strictEqual(asyncLocalStorage.getStore(), undefined);
