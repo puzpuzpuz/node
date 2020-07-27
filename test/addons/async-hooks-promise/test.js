@@ -13,16 +13,19 @@ if (process.env.NODE_TEST_WITH_ASYNC_HOOKS) {
   return;
 }
 
-// Baseline to make sure the internal field isn't being set.
+// Baseline to make sure both internal fields aren't set.
 assert.strictEqual(
-  binding.getPromiseField(Promise.resolve(1)),
+  binding.getPromiseField(Promise.resolve(1), 0),
+  0);
+assert.strictEqual(
+  binding.getPromiseField(Promise.resolve(1), 1),
   0);
 
 const emptyHook = async_hooks.createHook({}).enable();
 
 // Check that no PromiseWrap is created when there are no hook callbacks.
 assert.strictEqual(
-  binding.getPromiseField(Promise.resolve(1)),
+  binding.getPromiseField(Promise.resolve(1), 1),
   0);
 
 emptyHook.disable();
@@ -41,10 +44,11 @@ const initOnlyHook = async_hooks.createHook({
 // Check that no PromiseWrap is created when only using an init hook.
 {
   const promise = Promise.resolve(1);
-  assert.strictEqual(binding.getPromiseField(promise), 0);
+  assert.strictEqual(typeof binding.getPromiseField(promise, 0), 'number');
+  assert.strictEqual(typeof binding.getPromiseField(promise, 1), 'number');
   assert.strictEqual(lastResource, promise);
-  assert.strictEqual(lastAsyncId, promise[async_id_symbol]);
-  assert.strictEqual(lastTriggerAsyncId, promise[trigger_async_id_symbol]);
+  assert.strictEqual(lastAsyncId, binding.getPromiseField(promise, 0));
+  assert.strictEqual(lastTriggerAsyncId, binding.getPromiseField(promise, 1));
 }
 
 initOnlyHook.disable();
@@ -65,7 +69,8 @@ const hookWithDestroy = async_hooks.createHook({
 // Check that the internal field returns the same PromiseWrap passed to init().
 {
   const promise = Promise.resolve(1);
-  const promiseWrap = binding.getPromiseField(promise);
+  const promiseWrap = binding.getPromiseField(promise, 0);
+  assert.strictEqual(binding.getPromiseField(promise, 1), 0);
   assert.strictEqual(lastResource, promiseWrap);
   assert.strictEqual(lastAsyncId, promiseWrap[async_id_symbol]);
   assert.strictEqual(lastTriggerAsyncId, promiseWrap[trigger_async_id_symbol]);
@@ -78,7 +83,10 @@ hookWithDestroy.disable();
 // future microtask.
 setImmediate(() => {
   assert.strictEqual(
-    binding.getPromiseField(Promise.resolve(1)),
+    binding.getPromiseField(Promise.resolve(1), 0),
+    0);
+  assert.strictEqual(
+    binding.getPromiseField(Promise.resolve(1), 1),
     0);
 
   const noDestroyHook = async_hooks.createHook({
@@ -95,10 +103,11 @@ setImmediate(() => {
 
   // Check that no PromiseWrap is created when there is no destroy hook.
   const promise = Promise.resolve(1);
-  assert.strictEqual(binding.getPromiseField(promise), 0);
+  assert.strictEqual(typeof binding.getPromiseField(promise, 0), 'number');
+  assert.strictEqual(typeof binding.getPromiseField(promise, 1), 'number');
   assert.strictEqual(lastResource, promise);
-  assert.strictEqual(lastAsyncId, promise[async_id_symbol]);
-  assert.strictEqual(lastTriggerAsyncId, promise[trigger_async_id_symbol]);
+  assert.strictEqual(lastAsyncId, binding.getPromiseField(promise, 0));
+  assert.strictEqual(lastTriggerAsyncId, binding.getPromiseField(promise, 1));
 
   noDestroyHook.disable();
 });

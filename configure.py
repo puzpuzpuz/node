@@ -1322,7 +1322,7 @@ def configure_v8(o):
   o['variables']['v8_optimized_debug'] = 0 if options.v8_non_optimized_debug else 1
   o['variables']['dcheck_always_on'] = 1 if options.v8_with_dchecks else 0
   o['variables']['v8_random_seed'] = 0  # Use a random seed for hash tables.
-  o['variables']['v8_promise_internal_field_count'] = 1 # Add internal field to promises for async hooks.
+  o['variables']['v8_promise_internal_field_count'] = 2 # Add internal fields to promises for async hooks.
   o['variables']['v8_use_siphash'] = 0 if options.without_siphash else 1
   o['variables']['v8_enable_pointer_compression'] = 1 if options.enable_pointer_compression else 0
   o['variables']['v8_enable_31bit_smis_on_64bit_arch'] = 1 if options.enable_pointer_compression else 0

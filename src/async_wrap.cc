@@ -189,6 +189,43 @@ void AsyncWrap::EmitAfter(Environment* env, double async_id) {
        env->async_hooks_after_function());
 }
 
+static double GetOrAssignPromiseAsyncId(Environment* env,
+                                        Local<Promise> promise,
+                                        bool read_only) {
+  if (!read_only &&
+       promise->GetAlignedPointerFromInternalField(0) == nullptr) {
+    double async_id = env->new_async_id();
+    promise->SetInternalField(0, Number::New(env->isolate(), async_id));
+    return async_id;
+  }
+
+  Local<Value> obj = promise->GetInternalField(0);
+  if (obj->IsNumber()) {
+    return obj.As<Number>()->Value();
+  }
+
+  return AsyncWrap::kInvalidAsyncId;
+}
+
+static double GetPromiseTriggerAsyncId(Environment* env,
+                                       Local<Promise> promise) {
+  if (promise->GetAlignedPointerFromInternalField(1) == nullptr) {
+    return AsyncWrap::kInvalidAsyncId;
+  }
+
+  Local<Value> obj = promise->GetInternalField(1);
+  return obj->IsNumber() ? obj.As<Number>()->Value()
+                          : AsyncWrap::kInvalidAsyncId;
+
+  return AsyncWrap::kInvalidAsyncId;
+}
+
+static void AssignPromiseTriggerAsyncId(Environment* env,
+                                        Local<Promise> promise,
+                                        double trigger_async_id) {
+  promise->SetInternalField(1, Number::New(env->isolate(), trigger_async_id));
+}
+
 class PromiseWrap : public AsyncWrap {
  public:
   PromiseWrap(Environment* env, Local<Object> object, bool silent)
@@ -226,24 +263,21 @@ PromiseWrap* PromiseWrap::New(Environment* env,
   if (!env->promise_wrap_template()->NewInstance(context).ToLocal(&obj))
     return nullptr;
 
-  CHECK_NULL(promise->GetAlignedPointerFromInternalField(0));
-  promise->SetInternalField(0, obj);
-
+  double async_id = kInvalidAsyncId;
+  double trigger_async_id = kInvalidAsyncId;
   // Skip for init events
   if (silent) {
-    Local<Value> maybe_async_id = promise
-        ->Get(context, env->async_id_symbol())
-        .ToLocalChecked();
+    // Interop with fast hook.
+    async_id = GetOrAssignPromiseAsyncId(env, promise, true);
+    trigger_async_id = GetPromiseTriggerAsyncId(env, promise);
+  }
 
-    Local<Value> maybe_trigger_async_id = promise
-        ->Get(context, env->trigger_async_id_symbol())
-        .ToLocalChecked();
+  promise->SetInternalField(0, obj);
 
-    if (maybe_async_id->IsNumber() && maybe_trigger_async_id->IsNumber()) {
-      double async_id = maybe_async_id.As<Number>()->Value();
-      double trigger_async_id = maybe_trigger_async_id.As<Number>()->Value();
-      return new PromiseWrap(env, obj, async_id, trigger_async_id);
-    }
+  if (async_id != kInvalidAsyncId && trigger_async_id != kInvalidAsyncId) {
+    // Clean up internal fields.
+    promise->SetInternalField(1, Undefined(env->isolate()));
+    return new PromiseWrap(env, obj, async_id, trigger_async_id);
   }
 
   return new PromiseWrap(env, obj, silent);
@@ -312,75 +346,62 @@ static uint16_t ToAsyncHooksType(PromiseHookType type) {
   UNREACHABLE();
 }
 
-// Simplified JavaScript hook fast-path for when there is no destroy hook
+// Simplified fast-path hook for when there is no destroy hook
 static void FastPromiseHook(PromiseHookType type, Local<Promise> promise,
                             Local<Value> parent) {
   Local<Context> context = promise->CreationContext();
   Environment* env = Environment::GetCurrent(context);
   if (env == nullptr) return;
 
-  if (type == PromiseHookType::kBefore &&
-      env->async_hooks()->fields()[AsyncHooks::kBefore] == 0) {
-    Local<Value> maybe_async_id;
-    if (!promise->Get(context, env->async_id_symbol())
-          .ToLocal(&maybe_async_id)) {
-      return;
-    }
-
-    Local<Value> maybe_trigger_async_id;
-    if (!promise->Get(context, env->trigger_async_id_symbol())
-          .ToLocal(&maybe_trigger_async_id)) {
-      return;
-    }
-
-    if (maybe_async_id->IsNumber() && maybe_trigger_async_id->IsNumber()) {
-      double async_id = maybe_async_id.As<Number>()->Value();
-      double trigger_async_id = maybe_trigger_async_id.As<Number>()->Value();
-      env->async_hooks()->push_async_context(
-          async_id, trigger_async_id, promise);
-    }
-
-    return;
+  double async_id = GetOrAssignPromiseAsyncId(env, promise, false);
+  if (async_id == AsyncWrap::kInvalidAsyncId) {
+    // Interop with slow hook.
+    PromiseWrap* wrap = extractPromiseWrap(promise);
+    if (wrap == nullptr) return;
+    async_id = wrap->get_async_id();
   }
 
-  if (type == PromiseHookType::kAfter &&
-      env->async_hooks()->fields()[AsyncHooks::kAfter] == 0) {
-    Local<Value> maybe_async_id;
-    if (!promise->Get(context, env->async_id_symbol())
-          .ToLocal(&maybe_async_id)) {
-      return;
-    }
-
-    if (maybe_async_id->IsNumber()) {
-      double async_id = maybe_async_id.As<Number>()->Value();
-      if (env->execution_async_id() == async_id) {
-        // This condition might not be true if async_hooks was enabled during
-        // the promise callback execution.
-        env->async_hooks()->pop_async_context(async_id);
+  double trigger_async_id = GetPromiseTriggerAsyncId(env, promise);
+  if (trigger_async_id == AsyncWrap::kInvalidAsyncId) {
+    // Interop with slow hook.
+    PromiseWrap* wrap = extractPromiseWrap(promise);
+    if (wrap != nullptr) {
+      trigger_async_id = wrap->get_trigger_async_id();
+    } else if (parent->IsPromise()) {
+      Local<Promise> parent_promise = parent.As<Promise>();
+      trigger_async_id = GetOrAssignPromiseAsyncId(env, parent_promise, false);
+      if (trigger_async_id == AsyncWrap::kInvalidAsyncId) {
+        // Interop with slow hook.
+        PromiseWrap* wrap = extractPromiseWrap(parent_promise);
+        if (wrap == nullptr) return;
+        trigger_async_id = wrap->get_trigger_async_id();
+      } else {
+        AssignPromiseTriggerAsyncId(env, promise, trigger_async_id);
       }
+    } else {
+      trigger_async_id = env->get_default_trigger_async_id();
     }
-
-    return;
   }
 
-  if (type == PromiseHookType::kResolve &&
-      env->async_hooks()->fields()[AsyncHooks::kPromiseResolve] == 0) {
-    return;
+  if (type == PromiseHookType::kInit) {
+    AsyncWrap::EmitAsyncInit(env, promise,
+                             env->async_hooks()
+                                ->provider_string(AsyncWrap::PROVIDER_PROMISE),
+                             async_id, trigger_async_id);
+  } else if (type == PromiseHookType::kBefore) {
+    env->async_hooks()->push_async_context(
+          async_id, trigger_async_id, promise);
+    AsyncWrap::EmitBefore(env, async_id);
+  } else if (type == PromiseHookType::kAfter) {
+    AsyncWrap::EmitAfter(env, async_id);
+     if (env->execution_async_id() == async_id) {
+       // This condition might not be true if async_hooks was enabled during
+       // the promise callback execution.
+       env->async_hooks()->pop_async_context(async_id);
+     }
+  } else if (type == PromiseHookType::kResolve) {
+    AsyncWrap::EmitPromiseResolve(env, async_id);
   }
-
-  // Getting up to this point means either init type or
-  // that there are active hooks of another type.
-  // In both cases fast-path JS hook should be called.
-
-  Local<Value> argv[] = {
-    Integer::New(env->isolate(), ToAsyncHooksType(type)),
-    promise,
-    parent
-  };
-
-  TryCatchScope try_catch(env, TryCatchScope::CatchMode::kFatal);
-  Local<Function> promise_hook = env->promise_hook_handler();
-  USE(promise_hook->Call(context, Undefined(env->isolate()), 3, argv));
 }
 
 static void FullPromiseHook(PromiseHookType type, Local<Promise> promise,
