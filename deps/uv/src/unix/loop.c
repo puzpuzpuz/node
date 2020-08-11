@@ -28,6 +28,7 @@
 #include <unistd.h>
 
 int uv_loop_init(uv_loop_t* loop) {
+  uv__loop_internal_fields_t* lfields;
   void* saved_data;
   int err;
 
@@ -35,6 +36,15 @@ int uv_loop_init(uv_loop_t* loop) {
   saved_data = loop->data;
   memset(loop, 0, sizeof(*loop));
   loop->data = saved_data;
+
+  lfields = (uv__loop_internal_fields_t*) uv__calloc(1, sizeof(*lfields));
+  if (lfields == NULL)
+    return UV_ENOMEM;
+  loop->internal_fields = lfields;
+
+  err = uv_mutex_init(&lfields->loop_metrics.lock);
+  if (err)
+    goto fail_metrics_mutex_init;
 
   heap_init((struct heap*) &loop->timer_heap);
   QUEUE_INIT(&loop->wq);
@@ -58,7 +68,7 @@ int uv_loop_init(uv_loop_t* loop) {
   loop->async_wfd = -1;
   loop->signal_pipefd[0] = -1;
   loop->signal_pipefd[1] = -1;
-  loop->backend_fd = -1;
+  uv__set_backend_fd(loop, -1);
   loop->emfile_fd = -1;
 
   loop->timer_counter = 0;
@@ -66,7 +76,7 @@ int uv_loop_init(uv_loop_t* loop) {
 
   err = uv__platform_loop_init(loop);
   if (err)
-    return err;
+    goto fail_platform_init;
 
   uv__signal_global_once_init();
   err = uv_signal_init(loop, &loop->child_watcher);
@@ -105,6 +115,13 @@ fail_rwlock_init:
 
 fail_signal_init:
   uv__platform_loop_delete(loop);
+
+fail_platform_init:
+  uv_mutex_destroy(&lfields->loop_metrics.lock);
+
+fail_metrics_mutex_init:
+  uv__free(lfields);
+  loop->internal_fields = NULL;
 
   uv__free(loop->watchers);
   loop->nwatchers = 0;
@@ -146,6 +163,8 @@ int uv_loop_fork(uv_loop_t* loop) {
 
 
 void uv__loop_close(uv_loop_t* loop) {
+  uv__loop_internal_fields_t* lfields;
+
   uv__signal_loop_cleanup(loop);
   uv__platform_loop_delete(loop);
   uv__async_stop(loop);
@@ -155,9 +174,9 @@ void uv__loop_close(uv_loop_t* loop) {
     loop->emfile_fd = -1;
   }
 
-  if (loop->backend_fd != -1) {
-    uv__close(loop->backend_fd);
-    loop->backend_fd = -1;
+  if (uv__get_backend_fd(loop) != -1) {
+    uv__close(uv__get_backend_fd(loop));
+    uv__set_backend_fd(loop, -1);
   }
 
   uv_mutex_lock(&loop->wq_mutex);
@@ -181,10 +200,23 @@ void uv__loop_close(uv_loop_t* loop) {
   uv__free(loop->watchers);
   loop->watchers = NULL;
   loop->nwatchers = 0;
+
+  lfields = uv__get_internal_fields(loop);
+  uv_mutex_destroy(&lfields->loop_metrics.lock);
+  uv__free(lfields);
+  loop->internal_fields = NULL;
 }
 
 
 int uv__loop_configure(uv_loop_t* loop, uv_loop_option option, va_list ap) {
+  uv__loop_internal_fields_t* lfields;
+
+  lfields = uv__get_internal_fields(loop);
+  if (option == UV_METRICS_IDLE_TIME) {
+    lfields->flags |= UV_METRICS_IDLE_TIME;
+    return 0;
+  }
+
   if (option != UV_LOOP_BLOCK_SIGNAL)
     return UV_ENOSYS;
 

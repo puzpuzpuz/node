@@ -25,6 +25,8 @@
 
 #include "uv.h"
 #include "internal.h"
+#include "liburing.h"
+#include "uv/threadpool.h"
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -75,16 +77,32 @@
 # define CLOCK_BOOTTIME 7
 #endif
 
+/* The io_uring submission and completion queues have fixed sizes (CQ twice the
+ * size of the SQ). This must be a power of two, in the range
+ * [1, IORING_MAX_ENTRIES (currently 4096)]. Currently, if more reqs that use
+ * io_uring are issued in one loop iteration than the queues can hold, then the
+ * overflowing requests are handled by the threadpool impl.
+ */
+#ifndef IOURING_SQ_SIZE
+# define IOURING_SQ_SIZE 256
+#endif
+
 static int read_models(unsigned int numcpus, uv_cpu_info_t* ci);
 static int read_times(FILE* statfile_fp,
                       unsigned int numcpus,
                       uv_cpu_info_t* ci);
 static void read_speeds(unsigned int numcpus, uv_cpu_info_t* ci);
 static uint64_t read_cpufreq(unsigned int cpunum);
+void uv__io_uring_done(uv_loop_t* loop, uv__io_t* w, unsigned int events);
 
 
 int uv__platform_loop_init(uv_loop_t* loop) {
   int fd;
+  int rc;
+  static int no_uring;
+  struct uv__backend_data_io_uring* backend_data;
+  struct io_uring* ring;
+
   fd = epoll_create1(O_CLOEXEC);
 
   /* epoll_create1() can fail either because it's not implemented (old kernel)
@@ -97,14 +115,119 @@ int uv__platform_loop_init(uv_loop_t* loop) {
       uv__cloexec(fd, 1);
   }
 
-  loop->backend_fd = fd;
   loop->inotify_fd = -1;
   loop->inotify_watchers = NULL;
 
   if (fd == -1)
     return UV__ERR(errno);
 
+  if (no_uring) fallback: {
+    loop->backend.fd = fd;
+  } else {
+    /* Use io_uring when available. */
+    backend_data = uv__malloc(sizeof(*backend_data));
+    if (backend_data == NULL)
+      return UV_ENOMEM;
+
+    ring = &backend_data->ring;
+
+    rc = io_uring_queue_init(IOURING_SQ_SIZE, ring, 0);
+
+    if (rc != 0) {
+      uv__free(backend_data);
+      backend_data = NULL;
+      if (rc == UV_ENOSYS) {
+        no_uring = 1;
+        goto fallback;
+      }
+      return UV__ERR(rc);
+    }
+
+    rc = uv__cloexec(fd, 1);
+    if (rc) {
+      io_uring_queue_exit(ring);
+      uv__free(backend_data);
+      backend_data = NULL;
+      return UV__ERR(rc);
+    }
+
+    backend_data->fd = fd;
+
+    uv__handle_init(loop, &backend_data->poll_handle, UV_POLL);
+    backend_data->poll_handle.flags |= UV_HANDLE_INTERNAL;
+    uv__io_init(&backend_data->poll_handle.io_watcher,
+                uv__io_uring_done,
+                ring->ring_fd);
+
+    loop->flags |= UV_LOOP_USE_IOURING;
+    loop->backend.data = backend_data;
+  }
+
   return 0;
+}
+
+
+void uv__io_uring_done(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
+  uv_poll_t* handle;
+  struct io_uring* ring;
+  struct uv__backend_data_io_uring* backend_data;
+  struct io_uring_cqe* cqe;
+  uv_fs_t* req;
+  int finished1;
+
+  handle = container_of(w, uv_poll_t, io_watcher);
+  backend_data = loop->backend.data;
+  ring = &backend_data->ring;
+
+  finished1 = 0;
+  while (1) { /* Drain the CQ. */
+    io_uring_peek_cqe(ring, &cqe);
+
+    if (cqe == NULL)
+      break;
+
+    assert(backend_data->pending > 0);
+    if (--backend_data->pending == 0)
+      uv_poll_stop(handle);
+
+    req = (void*) (uintptr_t) cqe->user_data;
+
+    /* uv_cancel sets result to UV_ECANCELED. Don't overwrite that. */
+    if (req->result == 0)
+      req->result = cqe->res;
+
+    io_uring_cq_advance(ring, 1);
+
+    if (req->result == -EINVAL) {
+      /* io_uring doesn't support some operations that read/write do (e.g. readv
+       * on stdin). Retry with the threadpool impl.
+       */
+      req->result = 0;
+      req->priv.fs_req_engine = UV__ENGINE_THREADPOOL;
+
+      switch (req->fs_type) {
+        case UV_FS_WRITE:
+        case UV_FS_READ:
+        case UV_FS_FSYNC:
+          uv__req_register(loop, req);
+          uv__work_submit(loop,
+                          &req->work_req,
+                          UV__WORK_FAST_IO,
+                          uv__fs_work,
+                          uv__fs_done);
+          break;
+        default:
+          UNREACHABLE();
+      }
+
+    } else {
+      req->cb(req);
+    }
+
+    finished1 = 1;
+  }
+
+  assert(finished1 && "io_uring signal raised but no CQEs retrieved");
 }
 
 
@@ -114,8 +237,8 @@ int uv__io_fork(uv_loop_t* loop) {
 
   old_watchers = loop->inotify_watchers;
 
-  uv__close(loop->backend_fd);
-  loop->backend_fd = -1;
+  uv__close(uv__get_backend_fd(loop));
+  uv__set_backend_fd(loop, -1);
   uv__platform_loop_delete(loop);
 
   err = uv__platform_loop_init(loop);
@@ -127,6 +250,19 @@ int uv__io_fork(uv_loop_t* loop) {
 
 
 void uv__platform_loop_delete(uv_loop_t* loop) {
+  struct uv__backend_data_io_uring* backend_data;
+  int backend_fd;
+
+  if (loop->flags & UV_LOOP_USE_IOURING) {
+    /* Free data and switch back to fd (other cleanup code needs the fd). */
+    backend_data = loop->backend.data;
+    backend_fd = backend_data->fd;
+    io_uring_queue_exit(&backend_data->ring);
+    uv__free(backend_data);
+    loop->flags ^= UV_LOOP_USE_IOURING;
+    loop->backend.fd = backend_fd;
+  }
+
   if (loop->inotify_fd == -1) return;
   uv__io_stop(loop, &loop->inotify_read_watcher, POLLIN);
   uv__close(loop->inotify_fd);
@@ -157,12 +293,12 @@ void uv__platform_invalidate_fd(uv_loop_t* loop, int fd) {
    *
    * We pass in a dummy epoll_event, to work around a bug in old kernels.
    */
-  if (loop->backend_fd >= 0) {
+  if (uv__get_backend_fd(loop) >= 0) {
     /* Work around a bug in kernels 3.10 to 3.19 where passing a struct that
      * has the EPOLLWAKEUP flag set generates spurious audit syslog warnings.
      */
     memset(&dummy, 0, sizeof(dummy));
-    epoll_ctl(loop->backend_fd, EPOLL_CTL_DEL, fd, &dummy);
+    epoll_ctl(uv__get_backend_fd(loop), EPOLL_CTL_DEL, fd, &dummy);
   }
 }
 
@@ -176,12 +312,12 @@ int uv__io_check_fd(uv_loop_t* loop, int fd) {
   e.data.fd = -1;
 
   rc = 0;
-  if (epoll_ctl(loop->backend_fd, EPOLL_CTL_ADD, fd, &e))
+  if (epoll_ctl(uv__get_backend_fd(loop), EPOLL_CTL_ADD, fd, &e))
     if (errno != EEXIST)
       rc = UV__ERR(errno);
 
   if (rc == 0)
-    if (epoll_ctl(loop->backend_fd, EPOLL_CTL_DEL, fd, &e))
+    if (epoll_ctl(uv__get_backend_fd(loop), EPOLL_CTL_DEL, fd, &e))
       abort();
 
   return rc;
@@ -218,6 +354,8 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int fd;
   int op;
   int i;
+  int user_timeout;
+  int reset_timeout;
 
   if (loop->nfds == 0) {
     assert(QUEUE_EMPTY(&loop->watcher_queue));
@@ -247,14 +385,14 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     /* XXX Future optimization: do EPOLL_CTL_MOD lazily if we stop watching
      * events, skip the syscall and squelch the events after epoll_wait().
      */
-    if (epoll_ctl(loop->backend_fd, op, w->fd, &e)) {
+    if (epoll_ctl(uv__get_backend_fd(loop), op, w->fd, &e)) {
       if (errno != EEXIST)
         abort();
 
       assert(op == EPOLL_CTL_ADD);
 
       /* We've reactivated a file descriptor that's been watched before. */
-      if (epoll_ctl(loop->backend_fd, EPOLL_CTL_MOD, w->fd, &e))
+      if (epoll_ctl(uv__get_backend_fd(loop), EPOLL_CTL_MOD, w->fd, &e))
         abort();
     }
 
@@ -273,6 +411,14 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   count = 48; /* Benchmarks suggest this gives the best throughput. */
   real_timeout = timeout;
 
+  if (uv__get_internal_fields(loop)->flags & UV_METRICS_IDLE_TIME) {
+    reset_timeout = 1;
+    user_timeout = timeout;
+    timeout = 0;
+  } else {
+    reset_timeout = 0;
+  }
+
   /* You could argue there is a dependency between these two but
    * ultimately we don't care about their ordering with respect
    * to one another. Worst case, we make a few system calls that
@@ -283,6 +429,12 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   no_epoll_wait = uv__load_relaxed(&no_epoll_wait_cached);
 
   for (;;) {
+    /* Only need to set the provider_entry_time if timeout != 0. The function
+     * will return early if the loop isn't configured with UV_METRICS_IDLE_TIME.
+     */
+    if (timeout != 0)
+      uv__metrics_set_provider_entry_time(loop);
+
     /* See the comment for max_safe_timeout for an explanation of why
      * this is necessary.  Executive summary: kernel bug workaround.
      */
@@ -294,7 +446,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
         abort();
 
     if (no_epoll_wait != 0 || (sigmask != 0 && no_epoll_pwait == 0)) {
-      nfds = epoll_pwait(loop->backend_fd,
+      nfds = epoll_pwait(uv__get_backend_fd(loop),
                          events,
                          ARRAY_SIZE(events),
                          timeout,
@@ -304,7 +456,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
         no_epoll_pwait = 1;
       }
     } else {
-      nfds = epoll_wait(loop->backend_fd,
+      nfds = epoll_wait(uv__get_backend_fd(loop),
                         events,
                         ARRAY_SIZE(events),
                         timeout);
@@ -327,6 +479,14 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     if (nfds == 0) {
       assert(timeout != -1);
 
+      if (reset_timeout != 0) {
+        timeout = user_timeout;
+        reset_timeout = 0;
+      }
+
+      if (timeout == -1)
+        continue;
+
       if (timeout == 0)
         return;
 
@@ -345,6 +505,11 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
 
       if (errno != EINTR)
         abort();
+
+      if (reset_timeout != 0) {
+        timeout = user_timeout;
+        reset_timeout = 0;
+      }
 
       if (timeout == -1)
         continue;
@@ -391,7 +556,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
          * Ignore all errors because we may be racing with another thread
          * when the file descriptor is closed.
          */
-        epoll_ctl(loop->backend_fd, EPOLL_CTL_DEL, fd, pe);
+        epoll_ctl(uv__get_backend_fd(loop), EPOLL_CTL_DEL, fd, pe);
         continue;
       }
 
@@ -425,17 +590,26 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
         /* Run signal watchers last.  This also affects child process watchers
          * because those are implemented in terms of signal watchers.
          */
-        if (w == &loop->signal_io_watcher)
+        if (w == &loop->signal_io_watcher) {
           have_signals = 1;
-        else
+        } else {
+          uv__metrics_update_idle_time(loop);
           w->cb(loop, w, pe->events);
+        }
 
         nevents++;
       }
     }
 
-    if (have_signals != 0)
+    if (reset_timeout != 0) {
+      timeout = user_timeout;
+      reset_timeout = 0;
+    }
+
+    if (have_signals != 0) {
+      uv__metrics_update_idle_time(loop);
       loop->signal_io_watcher.cb(loop, &loop->signal_io_watcher, POLLIN);
+    }
 
     loop->watchers[loop->nwatchers] = NULL;
     loop->watchers[loop->nwatchers + 1] = NULL;
@@ -483,18 +657,22 @@ uint64_t uv__hrtime(uv_clocktype_t type) {
   /* TODO(bnoordhuis) Use CLOCK_MONOTONIC_COARSE for UV_CLOCK_PRECISE
    * when it has microsecond granularity or better (unlikely).
    */
-  if (type == UV_CLOCK_FAST && fast_clock_id == -1) {
-    if (clock_getres(CLOCK_MONOTONIC_COARSE, &t) == 0 &&
-        t.tv_nsec <= 1 * 1000 * 1000) {
-      fast_clock_id = CLOCK_MONOTONIC_COARSE;
-    } else {
-      fast_clock_id = CLOCK_MONOTONIC;
-    }
-  }
+  clock_id = CLOCK_MONOTONIC;
+  if (type != UV_CLOCK_FAST)
+    goto done;
+
+  clock_id = uv__load_relaxed(&fast_clock_id);
+  if (clock_id != -1)
+    goto done;
 
   clock_id = CLOCK_MONOTONIC;
-  if (type == UV_CLOCK_FAST)
-    clock_id = fast_clock_id;
+  if (0 == clock_getres(CLOCK_MONOTONIC_COARSE, &t))
+    if (t.tv_nsec <= 1 * 1000 * 1000)
+      clock_id = CLOCK_MONOTONIC_COARSE;
+
+  uv__store_relaxed(&fast_clock_id, clock_id);
+
+done:
 
   if (clock_gettime(clock_id, &t))
     return 0;  /* Not really possible. */

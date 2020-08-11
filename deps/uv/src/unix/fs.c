@@ -94,6 +94,7 @@ extern char *mkdtemp(char *template); /* See issue #740 on AIX < 7 */
     if (req == NULL)                                                          \
       return UV_EINVAL;                                                       \
     UV_REQ_INIT(req, UV_FS);                                                  \
+    req->priv.fs_req_engine = UV__ENGINE_DEFAULT;                             \
     req->fs_type = UV_FS_ ## subtype;                                         \
     req->result = 0;                                                          \
     req->ptr = NULL;                                                          \
@@ -155,6 +156,15 @@ extern char *mkdtemp(char *template); /* See issue #740 on AIX < 7 */
     }                                                                         \
   }                                                                           \
   while (0)
+
+
+/* On Linux, some tasks try to use io_uring, but must be retried with the
+ * threadpool if it fails/operation isn't supported by io_uring. See def in
+ * linux-iouring.c.
+ */
+static int uv__fs_retry_with_threadpool(int rc) {
+  return rc == UV_ENOSYS || rc == UV_ENOTSUP || rc == UV_ENOMEM;
+}
 
 
 static int uv__fs_close(int fd) {
@@ -883,8 +893,27 @@ static ssize_t uv__fs_sendfile(uv_fs_t* req) {
     ssize_t r;
 
     off = req->off;
+
+#ifdef __linux__
+    {
+      static int copy_file_range_support = 1;
+
+      if (copy_file_range_support) {
+        r = uv__fs_copy_file_range(in_fd, NULL, out_fd, &off, req->bufsml[0].len, 0);
+
+        if (r == -1 && errno == ENOSYS) {
+          errno = 0;
+          copy_file_range_support = 0;
+        } else {
+          goto ok;
+        }
+      }
+    }
+#endif
+
     r = sendfile(out_fd, in_fd, &off, req->bufsml[0].len);
 
+ok:
     /* sendfile() on SunOS returns EINVAL if the target fd is not a socket but
      * it still writes out data. Fortunately, we can detect it by checking if
      * the offset has been updated.
@@ -1127,7 +1156,7 @@ static ssize_t uv__fs_copyfile(uv_fs_t* req) {
     goto out;
   }
 
-  dst_flags = O_WRONLY | O_CREAT | O_TRUNC;
+  dst_flags = O_WRONLY | O_CREAT;
 
   if (req->flags & UV_FS_COPYFILE_EXCL)
     dst_flags |= O_EXCL;
@@ -1146,16 +1175,26 @@ static ssize_t uv__fs_copyfile(uv_fs_t* req) {
     goto out;
   }
 
-  /* Get the destination file's mode. */
-  if (fstat(dstfd, &dst_statsbuf)) {
-    err = UV__ERR(errno);
-    goto out;
-  }
+  /* If the file is not being opened exclusively, verify that the source and
+     destination are not the same file. If they are the same, bail out early. */
+  if ((req->flags & UV_FS_COPYFILE_EXCL) == 0) {
+    /* Get the destination file's mode. */
+    if (fstat(dstfd, &dst_statsbuf)) {
+      err = UV__ERR(errno);
+      goto out;
+    }
 
-  /* Check if srcfd and dstfd refer to the same file */
-  if (src_statsbuf.st_dev == dst_statsbuf.st_dev &&
-      src_statsbuf.st_ino == dst_statsbuf.st_ino) {
-    goto out;
+    /* Check if srcfd and dstfd refer to the same file */
+    if (src_statsbuf.st_dev == dst_statsbuf.st_dev &&
+        src_statsbuf.st_ino == dst_statsbuf.st_ino) {
+      goto out;
+    }
+
+    /* Truncate the file in case the destination already existed. */
+    if (ftruncate(dstfd, 0) != 0) {
+      err = UV__ERR(errno);
+      goto out;
+    }
   }
 
   if (fchmod(dstfd, src_statsbuf.st_mode) == -1) {
@@ -1523,7 +1562,7 @@ static ssize_t uv__fs_write_all(uv_fs_t* req) {
 }
 
 
-static void uv__fs_work(struct uv__work* w) {
+void uv__fs_work(struct uv__work* w) {
   int retry_on_eintr;
   uv_fs_t* req;
   ssize_t r;
@@ -1595,7 +1634,7 @@ static void uv__fs_work(struct uv__work* w) {
 }
 
 
-static void uv__fs_done(struct uv__work* w, int status) {
+void uv__fs_done(struct uv__work* w, int status) {
   uv_fs_t* req;
 
   req = container_of(w, uv_fs_t, work_req);
@@ -1710,8 +1749,13 @@ int uv_fs_fstat(uv_loop_t* loop, uv_fs_t* req, uv_file file, uv_fs_cb cb) {
 
 
 int uv_fs_fsync(uv_loop_t* loop, uv_fs_t* req, uv_file file, uv_fs_cb cb) {
+  int rc;
+
   INIT(FSYNC);
   req->file = file;
+  rc = uv__platform_fs_fsync(loop, req, file, cb);
+  if (!uv__fs_retry_with_threadpool(rc))
+    return rc;
   POST;
 }
 
@@ -1829,6 +1873,8 @@ int uv_fs_read(uv_loop_t* loop, uv_fs_t* req,
                unsigned int nbufs,
                int64_t off,
                uv_fs_cb cb) {
+  int rc;
+
   INIT(READ);
 
   if (bufs == NULL || nbufs == 0)
@@ -1847,6 +1893,10 @@ int uv_fs_read(uv_loop_t* loop, uv_fs_t* req,
   memcpy(req->bufs, bufs, nbufs * sizeof(*bufs));
 
   req->off = off;
+  rc = uv__platform_fs_read(loop, req, file, bufs, nbufs, off, cb);
+  if (!uv__fs_retry_with_threadpool(rc))
+    return rc;
+
   POST;
 }
 
@@ -1999,6 +2049,8 @@ int uv_fs_write(uv_loop_t* loop,
                 unsigned int nbufs,
                 int64_t off,
                 uv_fs_cb cb) {
+  int rc;
+
   INIT(WRITE);
 
   if (bufs == NULL || nbufs == 0)
@@ -2017,6 +2069,11 @@ int uv_fs_write(uv_loop_t* loop,
   memcpy(req->bufs, bufs, nbufs * sizeof(*bufs));
 
   req->off = off;
+
+  rc = uv__platform_fs_write(loop, req, file, bufs, nbufs, off, cb);
+  if (!uv__fs_retry_with_threadpool(rc))
+    return rc;
+
   POST;
 }
 
@@ -2027,7 +2084,7 @@ void uv_fs_req_cleanup(uv_fs_t* req) {
 
   /* Only necessary for asychronous requests, i.e., requests with a callback.
    * Synchronous ones don't copy their arguments and have req->path and
-   * req->new_path pointing to user-owned memory.  UV_FS_MKDTEMP and 
+   * req->new_path pointing to user-owned memory.  UV_FS_MKDTEMP and
    * UV_FS_MKSTEMP are the exception to the rule, they always allocate memory.
    */
   if (req->path != NULL &&

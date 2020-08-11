@@ -107,6 +107,8 @@ if(WIN32)
   list(APPEND uv_defines WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0600)
   list(APPEND uv_libraries
        psapi
+       user32
+       advapi32
        iphlpapi
        userenv
        ws2_32)
@@ -230,10 +232,11 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND uv_defines _GNU_SOURCE _POSIX_C_SOURCE=200112)
-  list(APPEND uv_libraries dl rt)
+  list(APPEND uv_libraries dl rt uring)
   list(APPEND uv_sources
        src/unix/linux-core.c
        src/unix/linux-inotify.c
+       src/unix/linux-iouring.c
        src/unix/linux-syscalls.c
        src/unix/procfs-exepath.c
        src/unix/random-getrandom.c
@@ -324,6 +327,20 @@ target_include_directories(uv_a
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>)
 target_link_libraries(uv_a ${uv_libraries})
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_library(uring STATIC deps/liburing/src/queue.c
+                           deps/liburing/src/register.c
+                           deps/liburing/src/setup.c
+                           deps/liburing/src/syscall.c)
+  target_include_directories(uring PRIVATE deps/liburing/src/include)
+
+  target_include_directories(uv PUBLIC deps/liburing/src/include)
+  add_dependencies(uv uring)
+
+  target_include_directories(uv_a PUBLIC deps/liburing/src/include)
+  add_dependencies(uv_a uring)
+endif()
+
 if(LIBUV_BUILD_TESTS)
   # Small hack: use ${uv_test_sources} now to get the runner skeleton,
   # before the actual tests are added.
@@ -332,6 +349,7 @@ if(LIBUV_BUILD_TESTS)
     ${uv_test_sources}
     test/benchmark-async-pummel.c
     test/benchmark-async.c
+    test/benchmark-fs-read.c
     test/benchmark-fs-stat.c
     test/benchmark-getaddrinfo.c
     test/benchmark-loop-count.c
@@ -416,8 +434,12 @@ if(LIBUV_BUILD_TESTS)
        test/test-loop-handles.c
        test/test-loop-stop.c
        test/test-loop-time.c
+       test/test-metrics.c
        test/test-multiple-listen.c
        test/test-mutexes.c
+       test/test-not-readable-nor-writable-on-read-error.c
+       test/test-not-readable-on-eof.c
+       test/test-not-writable-after-shutdown.c
        test/test-osx-select.c
        test/test-pass-always.c
        test/test-ping-pong.c
@@ -473,6 +495,7 @@ if(LIBUV_BUILD_TESTS)
        test/test-tcp-oob.c
        test/test-tcp-open.c
        test/test-tcp-read-stop.c
+       test/test-tcp-read-stop-start.c
        test/test-tcp-shutdown-after-write.c
        test/test-tcp-try-write.c
        test/test-tcp-try-write-error.c
@@ -499,6 +522,7 @@ if(LIBUV_BUILD_TESTS)
        test/test-udp-create-socket-early.c
        test/test-udp-dgram-too-big.c
        test/test-udp-ipv6.c
+       test/test-udp-mmsg.c
        test/test-udp-multicast-interface.c
        test/test-udp-multicast-interface6.c
        test/test-udp-multicast-join.c
@@ -541,7 +565,7 @@ if(LIBUV_BUILD_TESTS)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 
-if(UNIX)
+if(UNIX OR MINGW)
   # Now for some gibbering horrors from beyond the stars...
   foreach(lib IN LISTS uv_libraries)
     list(APPEND LIBS "-l${lib}")
@@ -568,7 +592,7 @@ if(UNIX)
   install(TARGETS uv_a ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
-if(WIN32)
+if(MSVC)
   install(DIRECTORY include/ DESTINATION include)
   install(FILES LICENSE DESTINATION .)
   install(TARGETS uv uv_a

@@ -114,6 +114,13 @@ libuv_la_SOURCES += src/unix/async.c \
                    src/unix/thread.c \
                    src/unix/tty.c \
                    src/unix/udp.c
+# TODO this isn't right
+# liburing_LIBRARIES = liburing.a
+# liburing_a_SOURCES = deps/liburing/src/queue.c \
+#                      deps/liburing/src/register.c \
+#                      deps/liburing/src/setup.c \
+#                      deps/liburing/src/syscall.c
+# libuv_la_LIBADD = liburing
 
 endif  # WINNT
 
@@ -203,8 +210,12 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-loop-stop.c \
                          test/test-loop-time.c \
                          test/test-loop-configure.c \
+                         test/test-metrics.c \
                          test/test-multiple-listen.c \
                          test/test-mutexes.c \
+                         test/test-not-readable-nor-writable-on-read-error.c \
+                         test/test-not-readable-on-eof.c \
+                         test/test-not-writable-after-shutdown.c \
                          test/test-osx-select.c \
                          test/test-pass-always.c \
                          test/test-ping-pong.c \
@@ -259,6 +270,7 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-tcp-flags.c \
                          test/test-tcp-open.c \
                          test/test-tcp-read-stop.c \
+                         test/test-tcp-read-stop-start.c \
                          test/test-tcp-shutdown-after-write.c \
                          test/test-tcp-unexpected-read.c \
                          test/test-tcp-oob.c \
@@ -286,6 +298,7 @@ test_run_tests_SOURCES = test/blackhole-server.c \
                          test/test-udp-create-socket-early.c \
                          test/test-udp-dgram-too-big.c \
                          test/test-udp-ipv6.c \
+                         test/test-udp-mmsg.c \
                          test/test-udp-multicast-interface.c \
                          test/test-udp-multicast-interface6.c \
                          test/test-udp-multicast-join.c \
@@ -462,8 +475,10 @@ endif
 if LINUX
 uvinclude_HEADERS += include/uv/linux.h
 libuv_la_CFLAGS += -D_GNU_SOURCE
+AM_CPPFLAGS += -I$(top_srcdir)/deps/liburing/src/include
 libuv_la_SOURCES += src/unix/linux-core.c \
                     src/unix/linux-inotify.c \
+                    src/unix/linux-iouring.c \
                     src/unix/linux-syscalls.c \
                     src/unix/linux-syscalls.h \
                     src/unix/procfs-exepath.c \

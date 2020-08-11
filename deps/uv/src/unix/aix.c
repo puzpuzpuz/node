@@ -82,9 +82,9 @@ int uv__platform_loop_init(uv_loop_t* loop) {
 
   /* Passing maxfd of -1 should mean the limit is determined
    * by the user's ulimit or the global limit as per the doc */
-  loop->backend_fd = pollset_create(-1);
+  uv__set_backend_fd(loop, pollset_create(-1));
 
-  if (loop->backend_fd == -1)
+  if (uv__get_backend_fd(loop) == -1)
     return -1;
 
   return 0;
@@ -97,9 +97,9 @@ void uv__platform_loop_delete(uv_loop_t* loop) {
     loop->fs_fd = -1;
   }
 
-  if (loop->backend_fd != -1) {
-    pollset_destroy(loop->backend_fd);
-    loop->backend_fd = -1;
+  if (uv__get_backend_fd(loop) != -1) {
+    pollset_destroy(uv__get_backend_fd(loop));
+    uv__set_backend_fd(loop, -1);
   }
 }
 
@@ -118,11 +118,11 @@ int uv__io_check_fd(uv_loop_t* loop, int fd) {
   pc.cmd = PS_MOD;  /* Equivalent to PS_ADD if the fd is not in the pollset. */
   pc.fd = fd;
 
-  if (pollset_ctl(loop->backend_fd, &pc, 1))
+  if (pollset_ctl(uv__get_backend_fd(loop), &pc, 1))
     return UV__ERR(errno);
 
   pc.cmd = PS_DELETE;
-  if (pollset_ctl(loop->backend_fd, &pc, 1))
+  if (pollset_ctl(uv__get_backend_fd(loop), &pc, 1))
     abort();
 
   return 0;
@@ -145,6 +145,8 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int i;
   int rc;
   int add_failed;
+  int user_timeout;
+  int reset_timeout;
 
   if (loop->nfds == 0) {
     assert(QUEUE_EMPTY(&loop->watcher_queue));
@@ -167,14 +169,14 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     add_failed = 0;
     if (w->events == 0) {
       pc.cmd = PS_ADD;
-      if (pollset_ctl(loop->backend_fd, &pc, 1)) {
+      if (pollset_ctl(uv__get_backend_fd(loop), &pc, 1)) {
         if (errno != EINVAL) {
           assert(0 && "Failed to add file descriptor (pc.fd) to pollset");
           abort();
         }
         /* Check if the fd is already in the pollset */
         pqry.fd = pc.fd;
-        rc = pollset_query(loop->backend_fd, &pqry);
+        rc = pollset_query(uv__get_backend_fd(loop), &pqry);
         switch (rc) {
         case -1:
           assert(0 && "Failed to query pollset for file descriptor");
@@ -196,12 +198,12 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
        * compared to a PS_DELETE to be worth optimizing. Alternatively, could
        * lazily remove events, squelching them in the mean time. */
       pc.cmd = PS_DELETE;
-      if (pollset_ctl(loop->backend_fd, &pc, 1)) {
+      if (pollset_ctl(uv__get_backend_fd(loop), &pc, 1)) {
         assert(0 && "Failed to delete file descriptor (pc.fd) from pollset");
         abort();
       }
       pc.cmd = PS_ADD;
-      if (pollset_ctl(loop->backend_fd, &pc, 1)) {
+      if (pollset_ctl(uv__get_backend_fd(loop), &pc, 1)) {
         assert(0 && "Failed to add file descriptor (pc.fd) to pollset");
         abort();
       }
@@ -214,8 +216,22 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   base = loop->time;
   count = 48; /* Benchmarks suggest this gives the best throughput. */
 
+  if (uv__get_internal_fields(loop)->flags & UV_METRICS_IDLE_TIME) {
+    reset_timeout = 1;
+    user_timeout = timeout;
+    timeout = 0;
+  } else {
+    reset_timeout = 0;
+  }
+
   for (;;) {
-    nfds = pollset_poll(loop->backend_fd,
+    /* Only need to set the provider_entry_time if timeout != 0. The function
+     * will return early if the loop isn't configured with UV_METRICS_IDLE_TIME.
+     */
+    if (timeout != 0)
+      uv__metrics_set_provider_entry_time(loop);
+
+    nfds = pollset_poll(uv__get_backend_fd(loop),
                         events,
                         ARRAY_SIZE(events),
                         timeout);
@@ -227,6 +243,15 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     SAVE_ERRNO(uv__update_time(loop));
 
     if (nfds == 0) {
+      if (reset_timeout != 0) {
+        timeout = user_timeout;
+        reset_timeout = 0;
+        if (timeout == -1)
+          continue;
+        if (timeout > 0)
+          goto update_timeout;
+      }
+
       assert(timeout != -1);
       return;
     }
@@ -234,6 +259,11 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     if (nfds == -1) {
       if (errno != EINTR) {
         abort();
+      }
+
+      if (reset_timeout != 0) {
+        timeout = user_timeout;
+        reset_timeout = 0;
       }
 
       if (timeout == -1)
@@ -273,23 +303,32 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
          * Ignore all errors because we may be racing with another thread
          * when the file descriptor is closed.
          */
-        pollset_ctl(loop->backend_fd, &pc, 1);
+        pollset_ctl(uv__get_backend_fd(loop), &pc, 1);
         continue;
       }
 
       /* Run signal watchers last.  This also affects child process watchers
        * because those are implemented in terms of signal watchers.
        */
-      if (w == &loop->signal_io_watcher)
+      if (w == &loop->signal_io_watcher) {
         have_signals = 1;
-      else
+      } else {
+        uv__metrics_update_idle_time(loop);
         w->cb(loop, w, pe->revents);
+      }
 
       nevents++;
     }
 
-    if (have_signals != 0)
+    if (reset_timeout != 0) {
+      timeout = user_timeout;
+      reset_timeout = 0;
+    }
+
+    if (have_signals != 0) {
+      uv__metrics_update_idle_time(loop);
       loop->signal_io_watcher.cb(loop, &loop->signal_io_watcher, POLLIN);
+    }
 
     loop->watchers[loop->nwatchers] = NULL;
     loop->watchers[loop->nwatchers + 1] = NULL;
@@ -875,6 +914,10 @@ char** uv_setup_args(int argc, char** argv) {
 int uv_set_process_title(const char* title) {
   char* new_title;
 
+  /* If uv_setup_args wasn't called or failed, we can't continue. */
+  if (process_argv == NULL || args_mem == NULL)
+    return UV_ENOBUFS;
+
   /* We cannot free this pointer when libuv shuts down,
    * the process may still be using it.
    */
@@ -907,6 +950,10 @@ int uv_get_process_title(char* buffer, size_t size) {
   size_t len;
   if (buffer == NULL || size == 0)
     return UV_EINVAL;
+
+  /* If uv_setup_args wasn't called, we can't continue. */
+  if (process_argv == NULL)
+    return UV_ENOBUFS;
 
   uv_once(&process_title_mutex_once, init_process_title_mutex_once);
   uv_mutex_lock(&process_title_mutex);
@@ -1241,6 +1288,6 @@ void uv__platform_invalidate_fd(uv_loop_t* loop, int fd) {
   pc.events = 0;
   pc.cmd = PS_DELETE;
   pc.fd = fd;
-  if(loop->backend_fd >= 0)
-    pollset_ctl(loop->backend_fd, &pc, 1);
+  if(uv__get_backend_fd(loop) >= 0)
+    pollset_ctl(uv__get_backend_fd(loop), &pc, 1);
 }
