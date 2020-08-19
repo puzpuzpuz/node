@@ -1104,6 +1104,18 @@ FieldAccess AccessBuilder::ForOrderedHashMapOrSetNumberOfElements() {
 }
 
 // static
+FieldAccess AccessBuilder::ForOrderedHashMapBuckets() {
+  FieldAccess const access = {kTaggedBase,
+                              OrderedHashMap::NumberOfBucketsOffset(),
+                              MaybeHandle<Name>(),
+                              MaybeHandle<Map>(),
+                              TypeCache::Get()->kFixedArrayLengthType,
+                              MachineType::TaggedSigned(),
+                              kNoWriteBarrier};
+  return access;
+}
+
+// static
 ElementAccess AccessBuilder::ForOrderedHashMapEntryValue() {
   ElementAccess const access = {kTaggedBase,
                                 OrderedHashMap::HashTableStartOffset() +

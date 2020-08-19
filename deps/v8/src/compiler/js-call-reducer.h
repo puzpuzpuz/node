@@ -182,6 +182,8 @@ class V8_EXPORT_PRIVATE JSCallReducer final : public AdvancedReducer {
                                       IterationKind iteration_kind);
   Reduction ReduceCollectionPrototypeSize(Node* node,
                                           CollectionKind collection_kind);
+  Reduction ReduceCollectionPrototypeBuckets(Node* node,
+                                             CollectionKind collection_kind);
   Reduction ReduceCollectionIteratorPrototypeNext(
       Node* node, int entry_size, Handle<HeapObject> empty_collection,
       InstanceType collection_iterator_instance_type_first,

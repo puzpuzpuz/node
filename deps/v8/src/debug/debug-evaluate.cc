@@ -639,6 +639,7 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtins::Name id) {
     case Builtins::kMapPrototypeHas:
     case Builtins::kMapPrototypeEntries:
     case Builtins::kMapPrototypeGetSize:
+    case Builtins::kMapPrototypeGetBuckets:
     case Builtins::kMapPrototypeKeys:
     case Builtins::kMapPrototypeValues:
     // WeakMap builtins.

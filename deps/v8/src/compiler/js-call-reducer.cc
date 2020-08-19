@@ -4376,6 +4376,8 @@ Reduction JSCallReducer::ReduceJSCall(Node* node,
                                        IterationKind::kKeys);
     case Builtins::kMapPrototypeGetSize:
       return ReduceCollectionPrototypeSize(node, CollectionKind::kMap);
+    case Builtins::kMapPrototypeGetBuckets:
+      return ReduceCollectionPrototypeBuckets(node, CollectionKind::kMap);
     case Builtins::kMapPrototypeValues:
       return ReduceCollectionIteration(node, CollectionKind::kMap,
                                        IterationKind::kValues);
@@ -6813,6 +6815,30 @@ Reduction JSCallReducer::ReduceCollectionPrototypeSize(
   Node* value = effect = graph()->NewNode(
       simplified()->LoadField(
           AccessBuilder::ForOrderedHashMapOrSetNumberOfElements()),
+      table, effect, control);
+  ReplaceWithValue(node, value, effect, control);
+  return Replace(value);
+}
+
+Reduction JSCallReducer::ReduceCollectionPrototypeBuckets(
+    Node* node, CollectionKind collection_kind) {
+  DCHECK_EQ(IrOpcode::kJSCall, node->opcode());
+  Node* receiver = NodeProperties::GetValueInput(node, 1);
+  Node* effect = NodeProperties::GetEffectInput(node);
+  Node* control = NodeProperties::GetControlInput(node);
+
+  InstanceType type = InstanceTypeForCollectionKind(collection_kind);
+  MapInference inference(broker(), receiver, effect);
+  if (!inference.HaveMaps() || !inference.AllOfInstanceTypesAre(type)) {
+    return NoChange();
+  }
+
+  Node* table = effect = graph()->NewNode(
+      simplified()->LoadField(AccessBuilder::ForJSCollectionTable()), receiver,
+      effect, control);
+  Node* value = effect = graph()->NewNode(
+      simplified()->LoadField(
+          AccessBuilder::ForOrderedHashMapBuckets()),
       table, effect, control);
   ReplaceWithValue(node, value, effect, control);
   return Replace(value);

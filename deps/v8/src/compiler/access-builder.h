@@ -309,6 +309,7 @@ class V8_EXPORT_PRIVATE AccessBuilder final
   static FieldAccess ForOrderedHashMapOrSetNextTable();
   static FieldAccess ForOrderedHashMapOrSetNumberOfBuckets();
   static FieldAccess ForOrderedHashMapOrSetNumberOfElements();
+  static FieldAccess ForOrderedHashMapBuckets();
   static FieldAccess ForOrderedHashMapOrSetNumberOfDeletedElements();
 
   // Provides access to OrderedHashMap elements.

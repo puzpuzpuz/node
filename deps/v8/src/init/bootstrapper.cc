@@ -3341,6 +3341,9 @@ void Genesis::InitializeGlobal(Handle<JSGlobalObject> global_object,
     SimpleInstallGetter(isolate_, prototype,
                         factory->InternalizeUtf8String("size"),
                         Builtins::kMapPrototypeGetSize, true);
+    SimpleInstallGetter(isolate_, prototype,
+                        factory->InternalizeUtf8String("buckets"),
+                        Builtins::kMapPrototypeGetBuckets, true);
     SimpleInstallFunction(isolate_, prototype, "values",
                           Builtins::kMapPrototypeValues, 0, true);
 

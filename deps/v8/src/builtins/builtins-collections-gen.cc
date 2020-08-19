@@ -1989,6 +1989,16 @@ TF_BUILTIN(MapPrototypeGetSize, CollectionsBuiltinsAssembler) {
   Return(LoadObjectField(table, OrderedHashMap::NumberOfElementsOffset()));
 }
 
+TF_BUILTIN(MapPrototypeGetBuckets, CollectionsBuiltinsAssembler) {
+  const TNode<Object> receiver = CAST(Parameter(Descriptor::kReceiver));
+  const TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  ThrowIfNotInstanceType(context, receiver, JS_MAP_TYPE,
+                         "get Map.prototype.buckets");
+  const TNode<OrderedHashMap> table =
+      LoadObjectField<OrderedHashMap>(CAST(receiver), JSMap::kTableOffset);
+  Return(LoadObjectField(table, OrderedHashMap::NumberOfBucketsOffset()));
+}
+
 TF_BUILTIN(MapPrototypeForEach, CollectionsBuiltinsAssembler) {
   const char* const kMethodName = "Map.prototype.forEach";
   TNode<Int32T> argc =

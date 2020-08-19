@@ -595,6 +595,8 @@ namespace internal {
   TFJ(MapPrototypeEntries, 0, kReceiver)                                       \
   /* ES #sec-get-map.prototype.size */                                         \
   TFJ(MapPrototypeGetSize, 0, kReceiver)                                       \
+  /* CUSTOM! */                                                                \
+  TFJ(MapPrototypeGetBuckets, 0, kReceiver)                                    \
   /* ES #sec-map.prototype.forEach */                                          \
   TFJ(MapPrototypeForEach, kDontAdaptArgumentsSentinel)                        \
   /* ES #sec-map.prototype.keys */                                             \
