@@ -98,7 +98,7 @@ for (let i = 0; i < chunks.length; i++) {
   tw.on('finish', common.mustCall(function() {
     // Got chunks in the right order
     assert.deepStrictEqual(tw.buffer, chunks);
-    assert.strictEqual(drains, 17);
+    assert.strictEqual(drains, 39);
   }));
 
   tw.on('drain', function() {
